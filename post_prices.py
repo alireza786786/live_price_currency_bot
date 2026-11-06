@@ -53,7 +53,7 @@ if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID or not SERVIX_API_KEY:
 # Servix
 # ============================================================
 
-SERVIX_URL = "https://servix.cc/api/v1/assets"
+SERVIX_URL = "http://api.navasan.tech/latest/?api_key=freeYsE2h3PXWdQ3eDTduTXGuEVHyZY1""
 
 HEADERS = {
     "X-API-Key": SERVIX_API_KEY,
