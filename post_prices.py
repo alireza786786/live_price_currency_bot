@@ -50,10 +50,10 @@ if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID or not SERVIX_API_KEY:
 
 
 # ============================================================
-# Servix
+# Servix / Navasan API
 # ============================================================
 
-SERVIX_URL = "http://api.navasan.tech/latest/?api_key=freeYsE2h3PXWdQ3eDTduTXGuEVHyZY1"
+SERVIX_URL = "http://api.navasan.tech/latest/"
 
 HEADERS = {
     "X-API-Key": SERVIX_API_KEY,
@@ -168,8 +168,6 @@ def fa_decimal_number(value):
 def fa_change_number(value):
     """
     نمایش مقدار تغییر قیمت به تومان (شامل علامت +/- به‌صورت خودکار).
-    همیشه به عدد صحیح گرد می‌شود چون تومان واحد اعشاری ندارد
-    (مثلاً 4.99 -> 5، نه 4.99).
     """
 
     try:
@@ -210,6 +208,7 @@ def get_all_prices():
     ]
 
     params = {
+        "api_key": SERVIX_API_KEY,
         "codes": ",".join(codes)
     }
 
@@ -224,11 +223,6 @@ def get_all_prices():
 
     data = response.json()
 
-    if not isinstance(data, list):
-        raise ValueError(
-            "پاسخ Servix فرمت مورد انتظار را ندارد."
-        )
-
     return data
 
 
@@ -236,19 +230,20 @@ def get_all_prices():
 # تبدیل پاسخ API به دیکشنری
 # ============================================================
 
-def make_price_map(items):
-
+def make_price_map(data):
     result = {}
 
-    for item in items:
-
-        if not isinstance(item, dict):
-            continue
-
-        code = item.get("code")
-
-        if code:
-            result[code] = item
+    if isinstance(data, dict):
+        for code, item in data.items():
+            if isinstance(item, dict):
+                item["code"] = item.get("code", code)
+                result[code] = item
+    elif isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict):
+                code = item.get("code")
+                if code:
+                    result[code] = item
 
     return result
 
@@ -358,12 +353,6 @@ def trend_html(
     previous_prices,
     is_ounce=False
 ):
-    """
-    نمایش تغییر قیمت با دایره سبز/قرمز.
-
-    نکته: fa_change_number خودش علامت +/- را اضافه می‌کند،
-    پس اینجا دیگر نباید دوباره + دستی اضافه شود.
-    """
 
     direction, change = get_price_change(
         symbol,
@@ -382,7 +371,6 @@ def trend_html(
             change_text = "-" + fa_decimal_number(change)
 
     else:
-        # fa_change_number خودش علامت +/- را دارد
         change_text = fa_change_number(change)
 
     emoji = "🟢" if direction == "up" else "🔴"
@@ -441,24 +429,16 @@ def rial_to_toman(value):
 
 
 # ============================================================
-# بیشترین/کمترین قیمت روز (مستقیم از کندل‌های Servix)
+# بیشترین/کمترین قیمت روز
 # ============================================================
 
 def _utc_text(dt):
-    """تبدیل زمان به قالب UTC مورد نیاز API."""
-
     return dt.astimezone(timezone.utc).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
 
 
 def summary_window():
-    """
-    بازه‌ی روزی که باید خلاصه‌اش ساخته شود (به وقت تهران).
-
-    اگر اجرا بعد از نیمه‌شب (قبل از ساعت ۶ صبح) باشد، یعنی خلاصه‌ی
-    دیروز؛ در غیر این صورت (مثلاً تست دستی) از ابتدای امروز تا الان.
-    """
 
     now = datetime.now(TEHRAN_TZ)
 
@@ -480,17 +460,12 @@ def summary_window():
 
 
 def fetch_day_range(symbol, start, end):
-    """
-    کمترین و بیشترین قیمت واقعی یک نماد در بازه‌ی داده‌شده.
-
-    از کندل‌های یک‌ساعته‌ی Servix استفاده می‌شود، پس به تعداد
-    اجراهای ربات در طول روز بستگی ندارد.
-    """
 
     response = requests.get(
-        f"{SERVIX_URL}/{symbol}/ohlc",
+        f"{SERVIX_URL}{symbol}/ohlc",
         headers=HEADERS,
         params={
+            "api_key": SERVIX_API_KEY,
             "interval": "1h",
             "from": _utc_text(start),
             "to": _utc_text(end),
@@ -534,26 +509,18 @@ def render_price_row(
     item = price_map.get(symbol)
 
     if not item:
-
         print(
             f"هشدار: نماد {symbol} در پاسخ Servix وجود ندارد."
         )
-
         return None
 
     raw_value = item.get("value")
 
     if raw_value is None:
-
         print(
             f"هشدار: مقدار {symbol} موجود نیست."
         )
-
         return None
-
-    # --------------------------------------------------------
-    # اونس جهانی
-    # --------------------------------------------------------
 
     if symbol == "GOLD_OUNCE_USD":
 
@@ -583,10 +550,6 @@ def render_price_row(
             f"<b>{price_text}</b> دلار"
             f"{change_html}"
         )
-
-    # --------------------------------------------------------
-    # قیمت‌های ریالی
-    # --------------------------------------------------------
 
     price = rial_to_toman(
         raw_value
@@ -728,9 +691,6 @@ def build_message():
 # ============================================================
 
 def build_summary_message():
-    """
-    خلاصه‌ی بیشترین/کمترین قیمت دلار، طلا و سکه برای یک روز کامل.
-    """
 
     start, end = summary_window()
 
@@ -817,7 +777,7 @@ def send_to_telegram(text):
 
 
 # ============================================================
-# ارسال و پین‌کردن خلاصه‌ی نیمه‌شب
+# مدیریت پین پیام خلاصه‌
 # ============================================================
 
 def load_pinned_message_id():
@@ -884,15 +844,10 @@ def unpin_previous_summary():
             timeout=15
         )
     except requests.RequestException:
-        # اگر پیام قبلی قبلاً آن‌پین شده یا پاک شده، مشکلی نیست
         pass
 
 
 def send_and_pin_to_telegram(text):
-    """
-    خلاصه‌ی شبانه را ارسال، پیام قبلی را آن‌پین، و پیام تازه
-    را پین می‌کند تا همیشه فقط آخرین خلاصه در بالای کانال باشد.
-    """
 
     unpin_previous_summary()
 
@@ -961,18 +916,19 @@ def list_all_symbols():
 
     data = get_all_prices()
 
-    print(f"\n=== {len(data)} نماد دریافت شد ===")
+    print(f"\n=== دریافت نمادها ===")
 
-    for item in data:
-
-        code = item.get("code")
-        name = item.get("labelFa")
-        value = item.get("value")
-        business_time = item.get("businessTime")
-
-        print(
-            f"{code} | {name} | {value} | {business_time}"
-        )
+    if isinstance(data, dict):
+        for code, item in data.items():
+            name = item.get("labelFa")
+            value = item.get("value")
+            print(f"{code} | {name} | {value}")
+    elif isinstance(data, list):
+        for item in data:
+            code = item.get("code")
+            name = item.get("labelFa")
+            value = item.get("value")
+            print(f"{code} | {name} | {value}")
 
 
 # ============================================================
